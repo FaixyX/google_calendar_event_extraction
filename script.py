@@ -1,12 +1,12 @@
-import os
-import pickle
-import json
-import html
-from dotenv import load_dotenv
+import os, pickle, json, html, re
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from datetime import datetime, timedelta
 
+from email_sender import send_calendar_email
+
+from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
@@ -37,6 +37,51 @@ def clean_html_text(text):
     text = re.sub(r'\s+', ' ', text).strip()
     
     return text
+
+def extract_booking_links(description):
+    """
+    Extract booking links from event description.
+    Looks for common booking link patterns and button text.
+    
+    :param description: Event description text
+    :return: List of booking links found
+    """
+    if not description:
+        return []
+    
+    booking_links = []
+    
+    # Common patterns for booking links
+    patterns = [
+        # Look for "Book Now" or similar text followed by URLs
+        r'(?:book\s+now|book\s+here|reserve\s+now|book\s+appointment|schedule\s+now)[\s:]*([^\s\n]+)',
+        # Look for URLs that might be booking links
+        r'(https?://[^\s\n]+(?:book|reserve|appointment|schedule)[^\s\n]*)',
+        # Look for common booking platforms
+        r'(https?://[^\s\n]*(?:calendly|acuity|square|booksy|mindbody|zenoti)[^\s\n]*)',
+        # Look for button-style links in HTML
+        r'<a[^>]*href=["\']([^"\']+)["\'][^>]*>(?:[^<]*book[^<]*|[^<]*reserve[^<]*|[^<]*schedule[^<]*)</a>',
+        # Look for any URL that contains booking-related keywords
+        r'(https?://[^\s\n]*(?:booking|appointment|reservation|schedule)[^\s\n]*)'
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, description, re.IGNORECASE)
+        for match in matches:
+            # Clean up the URL
+            url = match.strip()
+            if url.startswith('http'):
+                booking_links.append(url)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_links = []
+    for link in booking_links:
+        if link not in seen:
+            seen.add(link)
+            unique_links.append(link)
+    
+    return unique_links
 
 def authenticate_google_calendar():
     """Authenticates and returns a Google Calendar API service instance."""
@@ -146,10 +191,22 @@ def get_events_from_calendar(calendar_name, time_min=None, time_max=None, max_re
     
     events_in_range = 0
     for event in events:
+        print(event)
+        
+        # Get the original description for link extraction
+        original_description = event.get('description', '')
+        
+        # Clean the description for display
+        cleaned_description = clean_html_text(original_description) if ENABLE_HTML_CLEANING else original_description
+        
+        # Extract booking links from the original description
+        booking_links = extract_booking_links(original_description)
+        
         event_data = {
             'summary': event.get('summary', ''), # This is the title of the event
             'location': event.get('location', ''), # This is the location of the event
-            'description': clean_html_text(event.get('description', '')) if ENABLE_HTML_CLEANING else event.get('description', ''), # This is the text description of the event
+            'description': cleaned_description, # This is the text description of the event
+            'booking_links': booking_links, # This is the list of booking links found
             'start': event['start'].get('dateTime', event['start'].get('date')), # This is the start time of the event
             'end': event['end'].get('dateTime', event['end'].get('date')) # This is the end time of the event
         }
@@ -175,17 +232,40 @@ def get_events_from_calendar(calendar_name, time_min=None, time_max=None, max_re
         print(f"      End: {event_data['end']} → Date: {end_date}")
         print(f"      Type: {'Ongoing' if is_ongoing else 'One-time'}")
         
-        # Initialize date entry if it doesn't exist
-        if start_date not in categorized_events:
-            categorized_events[start_date] = {
-                'ongoing_events': [],
-                'one_time_events': []
-            }
-        
-        # Categorize the event
+        # For ongoing events, add to every day they overlap with the week
         if is_ongoing:
-            categorized_events[start_date]['ongoing_events'].append(event_data)
+            # Calculate the actual overlap dates within our week range
+            
+            overlap_start = max(start_date, week_start)
+            overlap_end = min(end_date, week_end)
+            
+            # Convert to datetime for iteration
+            current_date = datetime.strptime(overlap_start, '%Y-%m-%d')
+            end_datetime = datetime.strptime(overlap_end, '%Y-%m-%d')
+            
+            print(f"      Overlap with week: {overlap_start} to {overlap_end}")
+            
+            # Add event to each day it overlaps with the week
+            while current_date <= end_datetime:
+                date_key = current_date.strftime('%Y-%m-%d')
+                
+                # Initialize date entry if it doesn't exist
+                if date_key not in categorized_events:
+                    categorized_events[date_key] = {
+                        'ongoing_events': [],
+                        'one_time_events': []
+                    }
+                
+                categorized_events[date_key]['ongoing_events'].append(event_data)
+                current_date += timedelta(days=1)
         else:
+            # For one-time events, add only to the start date
+            if start_date not in categorized_events:
+                categorized_events[start_date] = {
+                    'ongoing_events': [],
+                    'one_time_events': []
+                }
+            
             categorized_events[start_date]['one_time_events'].append(event_data)
     
     print(f"   📈 Processed {events_in_range} events within week range (out of {len(events)} total)")
@@ -202,3 +282,14 @@ if __name__ == '__main__':
     # Replace with your calendar name
     calendar_name = GOOGLE_CALENDAR_NAME  # Change this to your calendar's name
     events = get_events_from_calendar(calendar_name)
+    
+    # Send email with calendar data
+    if events:
+        print("\n📧 Attempting to send email...")
+        email_sent = send_calendar_email(events)
+        if email_sent:
+            print("🎉 Calendar data has been sent via email!")
+        else:
+            print("⚠️  Email sending failed, but calendar data was saved to JSON file.")
+    else:
+        print("📭 No events found, skipping email sending.")
