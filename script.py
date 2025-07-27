@@ -2,7 +2,7 @@ import os, pickle, json, html, re
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from email_sender import send_calendar_email
 
@@ -20,6 +20,56 @@ ENABLE_HTML_CLEANING = os.getenv('ENABLE_HTML_CLEANING', 'false').lower() == 'tr
 
 # Define the scopes required
 SCOPES = [os.getenv('GOOGLE_CALENDAR_SCOPES', 'https://www.googleapis.com/auth/calendar.readonly')]
+
+# Pacific Time timezone (Los Angeles)
+PACIFIC_TZ = timezone(timedelta(hours=-8))  # PST (UTC-8)
+PACIFIC_DT_TZ = timezone(timedelta(hours=-7))  # PDT (UTC-7) - Daylight Saving Time
+
+def get_pacific_time():
+    """
+    Get current time in Pacific Time (Los Angeles).
+    Automatically handles Daylight Saving Time.
+    """
+    utc_now = datetime.now(timezone.utc)
+    # Pacific Time is UTC-8 (PST) or UTC-7 (PDT)
+    # We'll use UTC-7 as default (PDT) since most of the year is daylight saving
+    pacific_now = utc_now.astimezone(PACIFIC_DT_TZ)
+    return pacific_now
+
+def parse_datetime_with_timezone(date_time_str):
+    """
+    Parse datetime string with timezone information.
+    Handles both date-only and datetime strings.
+    Converts all times to Pacific Time.
+    
+    :param date_time_str: String like "2025-07-21" or "2025-07-21T10:30:00-07:00"
+    :return: datetime object in Pacific Time
+    """
+    if 'T' in date_time_str:
+        # Has time component, parse with timezone
+        try:
+            # Parse the datetime string
+            dt = datetime.fromisoformat(date_time_str.replace('Z', '+00:00'))
+            # Convert to Pacific Time
+            if dt.tzinfo is None:
+                # If no timezone info, assume it's in Pacific Time
+                dt = dt.replace(tzinfo=PACIFIC_DT_TZ)
+            else:
+                # Convert to Pacific Time
+                dt = dt.astimezone(PACIFIC_DT_TZ)
+            return dt
+        except ValueError as e:
+            print(f"Warning: Could not parse datetime '{date_time_str}': {e}")
+            return None
+    else:
+        # Date only, assume start of day in Pacific Time
+        try:
+            dt = datetime.strptime(date_time_str, '%Y-%m-%d')
+            dt = dt.replace(tzinfo=PACIFIC_DT_TZ)
+            return dt
+        except ValueError as e:
+            print(f"Warning: Could not parse date '{date_time_str}': {e}")
+            return None
 
 def clean_html_text(text):
     """Remove HTML tags and decode HTML entities from text."""
@@ -132,27 +182,27 @@ def get_events_from_calendar(calendar_name, time_min=None, time_max=None, max_re
         print(f"Calendar with name '{calendar_name}' not found.")
         return
 
-    # Set default time range (current week - Monday to Sunday)
+    # Set default time range (current week - Monday to Sunday) in Pacific Time
     if not time_min:
-        from datetime import datetime, timedelta
-        # Use local time instead of UTC to avoid timezone issues
-        today = datetime.now()
-        print(f"📅 Week calculation:")
-        print(f"   Today (local): {today.strftime('%Y-%m-%d %H:%M:%S')}")
+        # Use Pacific Time for all calculations
+        today = get_pacific_time()
+        print(f"📅 Week calculation (Pacific Time):")
+        print(f"   Today (Pacific): {today.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print(f"   Today weekday: {today.weekday()} (0=Monday, 6=Sunday)")
         
         # Get Monday of current week (weekday 0 = Monday)
         monday = today - timedelta(days=today.weekday())
-        time_min = monday.replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + 'Z'
-        print(f"   Monday (local): {monday.strftime('%Y-%m-%d %H:%M:%S')}")
+        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        time_min = monday.isoformat()
+        print(f"   Monday (Pacific): {monday.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print(f"   Time range start: {time_min}")
     if not time_max:
-        from datetime import datetime, timedelta
-        today = datetime.now()
+        today = get_pacific_time()
         # Get Sunday of current week (weekday 6 = Sunday)
         sunday = today + timedelta(days=6-today.weekday())
-        time_max = sunday.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat() + 'Z'
-        print(f"   Sunday (local): {sunday.strftime('%Y-%m-%d %H:%M:%S')}")
+        sunday = sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
+        time_max = sunday.isoformat()
+        print(f"   Sunday (Pacific): {sunday.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print(f"   Time range end: {time_max}")
         print(f"   Total days in range: 7 days (Monday to Sunday)")
         print()
@@ -184,10 +234,17 @@ def get_events_from_calendar(calendar_name, time_min=None, time_max=None, max_re
     
     print(f"📊 Processing events within week range...")
     
-    # Parse the week boundries for comparison
-    week_start = time_min.split('T')[0]
-    week_end = time_max.split('T')[0]
-    print(f"   Week range: {week_start} to {week_end}")
+    # Parse the week boundaries for comparison using Pacific Time
+    week_start_dt = parse_datetime_with_timezone(time_min.split('T')[0])
+    week_end_dt = parse_datetime_with_timezone(time_max.split('T')[0])
+    
+    if week_start_dt and week_end_dt:
+        week_start = week_start_dt.strftime('%Y-%m-%d')
+        week_end = week_end_dt.strftime('%Y-%m-%d')
+        print(f"   Week range: {week_start} to {week_end}")
+    else:
+        print("   Warning: Could not parse week boundaries")
+        return []
     
     events_in_range = 0
     for event in events:
@@ -211,10 +268,16 @@ def get_events_from_calendar(calendar_name, time_min=None, time_max=None, max_re
             'end': event['end'].get('dateTime', event['end'].get('date')) # This is the end time of the event
         }
         
-        # Parse start and end dates
-        from datetime import datetime
-        start_date = event_data['start'].split('T')[0] if 'T' in event_data['start'] else event_data['start']
-        end_date = event_data['end'].split('T')[0] if 'T' in event_data['end'] else event_data['end']
+        # Parse start and end dates with proper timezone handling (Pacific Time)
+        start_dt = parse_datetime_with_timezone(event_data['start'])
+        end_dt = parse_datetime_with_timezone(event_data['end'])
+        
+        if not start_dt or not end_dt:
+            print(f"   ⚠️  Skipping: {event_data['summary']} (could not parse dates)")
+            continue
+        
+        start_date = start_dt.strftime('%Y-%m-%d')
+        end_date = end_dt.strftime('%Y-%m-%d')
         
         # Check if event overlaps with the week range
         # Include events that: start_date <= week_end AND end_date >= week_start
