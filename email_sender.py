@@ -4,6 +4,7 @@ import json
 from email.message import EmailMessage
 from datetime import datetime
 from dotenv import load_dotenv
+import re
 
 # Load environment variables
 load_dotenv()
@@ -116,6 +117,35 @@ def format_calendar_data_for_email(calendar_data):
     
     return html_content
 
+def clean_booking_url(url):
+    """
+    Clean booking URL by removing HTML tags and extra characters.
+    
+    :param url: Raw booking URL
+    :return: Cleaned URL
+    """
+    if not url:
+        return ""
+    
+    # Remove HTML tags and their content
+    import re
+    
+    # Remove HTML tags like <b>BOOK</b>, <b>Check</b>, etc.
+    url = re.sub(r'<[^>]+>', '', url)
+    
+    # Remove common text that might be appended to URLs
+    url = re.sub(r'">[^"]*$', '', url)  # Remove "> followed by any text
+    url = re.sub(r'">$', '', url)       # Remove just "> at the end
+    
+    # Clean up any remaining quotes or special characters
+    url = url.strip('"').strip("'").strip()
+    
+    # Ensure URL starts with http/https
+    if url and not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    return url
+
 def create_events_table(events):
     """
     Create an HTML table for events with proper borders and auto-fitted content.
@@ -148,11 +178,16 @@ def create_events_table(events):
         
         # Create title with optional link and location
         if event.get('booking_links'):
-            booking_link = event['booking_links'][0]
-            print(booking_link)
-            title_html = f'<a href="{booking_link}" target="_blank" style="color: #1a73e8; text-decoration: none; font-weight: 500;">{title}</a>'
-            if len(event['booking_links']) > 1:
-                title_html += f'<br><a href="{event["booking_links"][1]}" target="_blank" style="display: inline-block; background-color: #1a73e8; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size: 11px; margin-top: 4px; font-weight: 500;">Additional Booking</a>'
+            # Clean the booking links
+            cleaned_links = [clean_booking_url(link) for link in event['booking_links'] if clean_booking_url(link)]
+            
+            if cleaned_links:
+                booking_link = cleaned_links[0]
+                title_html = f'<a href="{booking_link}" target="_blank" style="color: #1a73e8; text-decoration: none; font-weight: 500;">{title}</a>'
+                if len(cleaned_links) > 1:
+                    title_html += f'<br><a href="{cleaned_links[1]}" target="_blank" style="display: inline-block; background-color: #1a73e8; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size: 11px; margin-top: 4px; font-weight: 500;">Additional Booking</a>'
+            else:
+                title_html = f'<span style="font-weight: 500; color: #333;">{title}</span>'
         else:
             title_html = f'<span style="font-weight: 500; color: #333;">{title}</span>'
         
