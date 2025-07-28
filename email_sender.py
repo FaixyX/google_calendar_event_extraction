@@ -18,7 +18,7 @@ RECIPIENT_EMAIL = os.getenv('RECIPIENT_EMAIL', '')
 
 def format_calendar_data_for_email(calendar_data):
     """
-    Format the calendar data into a clean, professional email format showing only one-time events.
+    Format the calendar data into a clean, professional email format showing one-time events and ongoing events summary.
     
     :param calendar_data: Dictionary containing categorized events
     :return: HTML formatted string for email
@@ -26,16 +26,18 @@ def format_calendar_data_for_email(calendar_data):
     if not calendar_data:
         return "<p>No calendar events found for the specified time period.</p>"
     
-    # Get only one-time events
+    # Get one-time events
     all_one_time_events = []
+    all_ongoing_events = []
+    
     for date in calendar_data:
         all_one_time_events.extend(calendar_data[date]['one_time_events'])
-    
-    if not all_one_time_events:
-        return "<p>No upcoming one-time events found for the specified time period.</p>"
+        all_ongoing_events.extend(calendar_data[date]['ongoing_events'])
     
     # Count total events for summary
-    total_events = len(all_one_time_events)
+    total_one_time = len(all_one_time_events)
+    total_ongoing = len(all_ongoing_events)
+    total_events = total_one_time + total_ongoing
     
     # Get date range
     sorted_dates = sorted(calendar_data.keys())
@@ -68,72 +70,489 @@ def format_calendar_data_for_email(calendar_data):
                 <!-- Summary Section -->
                 <div style="background-color: #ecf0f1; border-left: 4px solid #3498db; padding: 20px; margin-bottom: 30px; border-radius: 4px;">
                     <h3 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 18px;">📊 Summary</h3>
-                    <p style="margin: 0; color: #34495e; font-size: 16px;"><strong>{total_events} upcoming one-time events</strong> across {len(calendar_data)} days</p>
+                    <p style="margin: 0; color: #34495e; font-size: 16px;"><strong>{total_events} total events</strong> across {len(calendar_data)} days</p>
+                    <p style="margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px;">• {total_one_time} upcoming one-time events</p>
+                    <p style="margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px;">• {total_ongoing} ongoing events</p>
                 </div>
     '''
     
-    # Group events by date
-    events_by_date = {}
-    for event in all_one_time_events:
-        date = format_date(event['start'])
-        if date not in events_by_date:
-            events_by_date[date] = []
-        events_by_date[date].append(event)
-    
-    # Sort dates
-    sorted_dates = sorted(events_by_date.keys(), key=lambda x: datetime.strptime(x, '%B %d'))
-    
-    for i, date in enumerate(sorted_dates):
-        events = events_by_date[date]
-        
-        # Get full date for header
-        try:
-            # Find the original date from calendar_data
-            for original_date in sorted(calendar_data.keys()):
-                date_obj = datetime.strptime(original_date, '%Y-%m-%d')
-                if date_obj.strftime('%B %d') == date:
-                    full_date = date_obj.strftime('%A, %B %d')
-                    break
-            else:
-                full_date = date
-        except:
-            full_date = date
-        
-        html_content += f'''
-                <!-- Date Section -->
-                <div style="margin-bottom: 25px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
-                    <div style="background-color: #34495e; color: white; padding: 15px 20px;">
-                        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">{full_date}</h2>
-                    </div>
-                    <div style="padding: 20px; background-color: white;">
+    # Add one-time events if they exist
+    if all_one_time_events:
+        html_content += '''
+                <!-- One-time Events Section -->
+                <div style="margin-bottom: 30px;">
+                    <h2 style="margin: 0 0 20px 0; color: #2c3e50; font-size: 22px; font-weight: 600; border-bottom: 2px solid #3498db; padding-bottom: 10px;">📅 Upcoming One-time Events</h2>
         '''
         
-        for event in events:
-            title = event["summary"]
-            location = event.get('location', '')
-            start_time = format_time(event['start'])
+        # Group one-time events by date
+        events_by_date = {}
+        for event in all_one_time_events:
+            date = format_date(event['start'])
+            if date not in events_by_date:
+                events_by_date[date] = []
+            events_by_date[date].append(event)
+        
+        # Sort dates
+        sorted_dates = sorted(events_by_date.keys(), key=lambda x: datetime.strptime(x, '%B %d'))
+        
+        for i, date in enumerate(sorted_dates):
+            events = events_by_date[date]
             
-            # Get emoji based on event title
-            emoji = get_event_emoji(title)
-            
-            # Create event text
-            event_text = f"{emoji} {title}"
-            if location:
-                event_text += f" – {location}"
-            event_text += f" ({start_time})"
-            
-            # Add booking link separately if available
-            if event.get('booking_links'):
-                cleaned_links = [clean_booking_url(link) for link in event['booking_links'] if clean_booking_url(link)]
-                if cleaned_links:
-                    booking_link = cleaned_links[0]
-                    event_text += f'<br><a href="{booking_link}" target="_blank" style="display: inline-block; background-color: #3498db; color: white; text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 4px; margin-top: 8px; font-weight: 500;">🔗 Book Here</a>'
-                    if len(cleaned_links) > 1:
-                        event_text += f'<br><a href="{cleaned_links[1]}" target="_blank" style="display: inline-block; background-color: #27ae60; color: white; text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 4px; margin-top: 5px; font-weight: 500;">🔗 Additional Booking</a>'
+            # Get full date for header
+            try:
+                # Find the original date from calendar_data
+                for original_date in sorted(calendar_data.keys()):
+                    date_obj = datetime.strptime(original_date, '%Y-%m-%d')
+                    if date_obj.strftime('%B %d') == date:
+                        full_date = date_obj.strftime('%A, %B %d')
+                        break
+                else:
+                    full_date = date
+            except:
+                full_date = date
             
             html_content += f'''
-                        <div style="margin-bottom: 12px; padding: 12px; background-color: #f8f9fa; border-left: 3px solid #3498db; border-radius: 3px;">
-                            <div style="font-size: 15px; line-height: 1.4; color: #2c3e50;">• {event_text}</div>
+                    <!-- Date Section -->
+                    <div style="margin-bottom: 25px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
+                        <div style="background-color: #34495e; color: white; padding: 15px 20px;">
+                            <h3 style="margin: 0; font-size: 18px; font-weight: 600;">{full_date}</h3>
+                        </div>
+                        <div style="padding: 20px; background-color: white;">
+            '''
+            
+            for event in events:
+                title = event["summary"]
+                location = event.get('location', '')
+                start_time = format_time(event['start'])
+                end_time = format_end_time(event.get('end', ''))
+                
+                # Get emoji based on event title
+                emoji = get_event_emoji(title)
+                
+                # Create event text
+                event_text = f"{emoji} {title}"
+                if location:
+                    event_text += f" – {location}"
+                
+                # Add time information
+                if end_time and end_time != start_time:
+                    event_text += f" ({start_time} - {end_time})"
+                else:
+                    event_text += f" ({start_time})"
+                
+                # Add booking link separately if available
+                if event.get('booking_links'):
+                    cleaned_links = [clean_booking_url(link) for link in event['booking_links'] if clean_booking_url(link)]
+                    if cleaned_links:
+                        booking_link = cleaned_links[0]
+                        event_text += f'<br><a href="{booking_link}" target="_blank" style="display: inline-block; background-color: #3498db; color: white; text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 4px; margin-top: 8px; font-weight: 500;">🔗 Book Here</a>'
+                        if len(cleaned_links) > 1:
+                            event_text += f'<br><a href="{cleaned_links[1]}" target="_blank" style="display: inline-block; background-color: #27ae60; color: white; text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 4px; margin-top: 5px; font-weight: 500;">🔗 Additional Booking</a>'
+                
+                html_content += f'''
+                            <div style="margin-bottom: 12px; padding: 12px; background-color: #f8f9fa; border-left: 3px solid #3498db; border-radius: 3px;">
+                                <div style="font-size: 15px; line-height: 1.4; color: #2c3e50;">• {event_text}</div>
+                            </div>
+                '''
+            
+            html_content += '''
+                        </div>
+                    </div>
+            '''
+        
+        html_content += '''
+                </div>
+        '''
+    
+    # Add ongoing events summary if they exist
+    if all_ongoing_events:
+        html_content += '''
+                <!-- Ongoing Events Summary Section -->
+                <div style="margin-bottom: 30px;">
+                    <h2 style="margin: 0 0 20px 0; color: #2c3e50; font-size: 22px; font-weight: 600; border-bottom: 2px solid #e67e22; padding-bottom: 10px;">📅 Ongoing Camps & Weekly Classes</h2>
+                    <div style="background-color: #fef9e7; border: 1px solid #f39c12; border-radius: 6px; padding: 20px;">
+        '''
+        
+        # Group ongoing events by category
+        events_by_category = {
+            'Summer Camps': [],
+            'Weekly Programs': [],
+            'Other Activities': []
+        }
+        
+        for event in all_ongoing_events:
+            title = event["summary"].lower()
+            
+            # Categorize events based on title keywords - check Summer Camps first
+            if any(word in title for word in ['camp', 'summer', 'immersion', '2025']):
+                events_by_category['Summer Camps'].append(event)
+            elif any(word in title for word in ['weekly', 'club', 'program', 'class', 'basketball', 'volleyball', 'tennis', 'soccer', 'baseball', 'track']):
+                events_by_category['Weekly Programs'].append(event)
+            else:
+                events_by_category['Other Activities'].append(event)
+        
+        # Display Summer Camps section
+        if events_by_category['Summer Camps']:
+            html_content += '''
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 18px; font-weight: 600;">😊 Summer Camps</h3>
+            '''
+            
+            # Group by base title to consolidate similar events (e.g., basketball club by age groups)
+            camps_by_base_title = {}
+            for event in events_by_category['Summer Camps']:
+                title = event["summary"]
+                
+                # Extract base title by removing age group brackets and extra details
+                base_title = title
+                # Remove age group patterns like [Ages X-X] or (Ages X-X)
+                base_title = re.sub(r'\s*\[Ages?\s*\d+-\d+\]', '', base_title)
+                base_title = re.sub(r'\s*\(Ages?\s*\d+-\d+\)', '', base_title)
+                # Remove extra whitespace
+                base_title = base_title.strip()
+                
+                # Extract age group if present
+                age_match = re.search(r'\[Ages?\s*(\d+-\d+)\]|\(Ages?\s*(\d+-\d+)\)', title)
+                age_group = age_match.group(1) or age_match.group(2) if age_match else None
+                
+                # Create unique key that includes age group to keep them separate
+                if age_group:
+                    unique_key = f"{base_title} [Ages {age_group}]"
+                else:
+                    unique_key = base_title
+                
+                if unique_key not in camps_by_base_title:
+                    camps_by_base_title[unique_key] = {
+                        'events': [],
+                        'dates': set(),
+                        'locations': set(),
+                        'times': set(),
+                        'base_title': base_title,
+                        'age_group': age_group
+                    }
+                
+                date = format_date(event['start'])
+                time = format_time(event['start'])
+                end_time = format_end_time(event.get('end', ''))
+                camps_by_base_title[unique_key]['events'].append(event)
+                camps_by_base_title[unique_key]['dates'].add(date)
+                camps_by_base_title[unique_key]['times'].add(time)
+                if event.get('end'):
+                    camps_by_base_title[unique_key]['end_times'] = camps_by_base_title[unique_key].get('end_times', set())
+                    camps_by_base_title[unique_key]['end_times'].add(end_time)
+                if event.get('location'):
+                    camps_by_base_title[unique_key]['locations'].add(event['location'])
+            
+            for unique_key, info in camps_by_base_title.items():
+                events = info['events']
+                dates = sorted(info['dates'], key=lambda x: datetime.strptime(x, '%B %d'))
+                times = sorted(info['times'])
+                end_times = sorted(info.get('end_times', set()))
+                locations = list(info['locations'])
+                base_title = info['base_title']
+                age_group = info['age_group']
+                
+                # Create event text
+                event_text = base_title
+                
+                # Add age group if present
+                if age_group:
+                    event_text += f" [Ages {age_group}]"
+                
+                if locations:
+                    event_text += f" – {', '.join(locations)}"
+                
+                # Enhanced logic to determine if it's a daily/recurring event
+                title_lower = base_title.lower()
+                is_recurring_by_keywords = any(word in title_lower for word in ['camp', 'daily', 'weekly', 'ongoing', 'recurring', 'class', 'program', 'club'])
+                
+                # Check if events span multiple days or appear frequently
+                date_objects = [datetime.strptime(date, '%B %d') for date in dates]
+                date_range_days = (max(date_objects) - min(date_objects)).days + 1
+                events_per_day = len(events) / len(dates) if dates else 0
+                
+                # Consider it daily if:
+                # 1. Has recurring keywords, OR
+                # 2. Spans multiple days, OR  
+                # 3. Has multiple events per day (like different age groups)
+                is_daily = (is_recurring_by_keywords or 
+                           len(dates) > 1 or 
+                           events_per_day > 1 or
+                           'summer' in title_lower)
+                
+                if is_daily:
+                    # Daily event - show as daily with all times
+                    if end_times and len(end_times) == len(times):
+                        # Show start-end time pairs
+                        time_pairs = []
+                        for i, start_time in enumerate(times):
+                            if i < len(end_times):
+                                time_pairs.append(f"{start_time}-{end_times[i]}")
+                            else:
+                                time_pairs.append(start_time)
+                        event_text += f" (daily, {', '.join(time_pairs)})"
+                    else:
+                        # Just show start times
+                        event_text += f" (daily, {', '.join(times)})"
+                else:
+                    # Single day event - show date and time
+                    if end_times and len(end_times) == len(times):
+                        # Show start-end time pairs
+                        time_pairs = []
+                        for i, start_time in enumerate(times):
+                            if i < len(end_times):
+                                time_pairs.append(f"{start_time}-{end_times[i]}")
+                            else:
+                                time_pairs.append(start_time)
+                        event_text += f" ({dates[0]}, {', '.join(time_pairs)})"
+                    else:
+                        # Just show start times
+                        event_text += f" ({dates[0]}, {', '.join(times)})"
+                
+                html_content += f'''
+                            <div style="margin-bottom: 8px; font-size: 15px; line-height: 1.4; color: #2c3e50;">• {event_text}</div>
+                '''
+            
+            html_content += '''
+                        </div>
+            '''
+        
+        # Display Weekly Programs section
+        if events_by_category['Weekly Programs']:
+            html_content += '''
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 18px; font-weight: 600;">🏀 Weekly Rec Center Programs</h3>
+            '''
+            
+            # Group by base title to consolidate similar events
+            programs_by_base_title = {}
+            for event in events_by_category['Weekly Programs']:
+                title = event["summary"]
+                
+                # Extract base title by removing age group brackets and extra details
+                base_title = title
+                # Remove age group patterns like [Ages X-X] or (Ages X-X)
+                base_title = re.sub(r'\s*\[Ages?\s*\d+-\d+\]', '', base_title)
+                base_title = re.sub(r'\s*\(Ages?\s*\d+-\d+\)', '', base_title)
+                # Remove extra whitespace
+                base_title = base_title.strip()
+                
+                # Extract age group if present
+                age_match = re.search(r'\[Ages?\s*(\d+-\d+)\]|\(Ages?\s*(\d+-\d+)\)', title)
+                age_group = age_match.group(1) or age_match.group(2) if age_match else None
+                
+                # Create unique key that includes age group to keep them separate
+                if age_group:
+                    unique_key = f"{base_title} [Ages {age_group}]"
+                else:
+                    unique_key = base_title
+                
+                if unique_key not in programs_by_base_title:
+                    programs_by_base_title[unique_key] = {
+                        'events': [],
+                        'dates': set(),
+                        'locations': set(),
+                        'times': set(),
+                        'base_title': base_title,
+                        'age_group': age_group
+                    }
+                
+                date = format_date(event['start'])
+                time = format_time(event['start'])
+                end_time = format_end_time(event.get('end', ''))
+                programs_by_base_title[unique_key]['events'].append(event)
+                programs_by_base_title[unique_key]['dates'].add(date)
+                programs_by_base_title[unique_key]['times'].add(time)
+                if event.get('end'):
+                    programs_by_base_title[unique_key]['end_times'] = programs_by_base_title[unique_key].get('end_times', set())
+                    programs_by_base_title[unique_key]['end_times'].add(end_time)
+                if event.get('location'):
+                    programs_by_base_title[unique_key]['locations'].add(event['location'])
+            
+            for unique_key, info in programs_by_base_title.items():
+                events = info['events']
+                dates = sorted(info['dates'], key=lambda x: datetime.strptime(x, '%B %d'))
+                times = sorted(info['times'])
+                end_times = sorted(info.get('end_times', set()))
+                locations = list(info['locations'])
+                base_title = info['base_title']
+                age_group = info['age_group']
+                
+                # Create event text
+                event_text = base_title
+                
+                # Add age group if present
+                if age_group:
+                    event_text += f" [Ages {age_group}]"
+                
+                if locations:
+                    event_text += f" – {', '.join(locations)}"
+                
+                # Enhanced logic to determine if it's a daily/recurring event
+                title_lower = base_title.lower()
+                is_recurring_by_keywords = any(word in title_lower for word in ['camp', 'daily', 'weekly', 'ongoing', 'recurring', 'class', 'program', 'club'])
+                
+                # Check if events span multiple days or appear frequently
+                date_objects = [datetime.strptime(date, '%B %d') for date in dates]
+                date_range_days = (max(date_objects) - min(date_objects)).days + 1
+                events_per_day = len(events) / len(dates) if dates else 0
+                
+                # Consider it daily if:
+                # 1. Has recurring keywords, OR
+                # 2. Spans multiple days, OR  
+                # 3. Has multiple events per day (like different age groups)
+                is_daily = (is_recurring_by_keywords or 
+                           len(dates) > 1 or 
+                           events_per_day > 1)
+                
+                if is_daily:
+                    # Daily event - show as daily with all times
+                    if end_times and len(end_times) == len(times):
+                        # Show start-end time pairs
+                        time_pairs = []
+                        for i, start_time in enumerate(times):
+                            if i < len(end_times):
+                                time_pairs.append(f"{start_time}-{end_times[i]}")
+                            else:
+                                time_pairs.append(start_time)
+                        event_text += f" (daily, {', '.join(time_pairs)})"
+                    else:
+                        # Just show start times
+                        event_text += f" (daily, {', '.join(times)})"
+                else:
+                    # Single day event - show date and time
+                    event_text += f" ({dates[0]}, {', '.join(times)})"
+                
+                html_content += f'''
+                            <div style="margin-bottom: 8px; font-size: 15px; line-height: 1.4; color: #2c3e50;">• {event_text}</div>
+                '''
+            
+            html_content += '''
+                        </div>
+            '''
+        
+        # Display Other Activities section
+        if events_by_category['Other Activities']:
+            html_content += '''
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 18px; font-weight: 600;">⛵ Other Activities</h3>
+            '''
+            
+            # Group by base title to consolidate similar events
+            activities_by_base_title = {}
+            for event in events_by_category['Other Activities']:
+                title = event["summary"]
+                
+                # Extract base title by removing age group brackets and extra details
+                base_title = title
+                # Remove age group patterns like [Ages X-X] or (Ages X-X)
+                base_title = re.sub(r'\s*\[Ages?\s*\d+-\d+\]', '', base_title)
+                base_title = re.sub(r'\s*\(Ages?\s*\d+-\d+\)', '', base_title)
+                # Remove extra whitespace
+                base_title = base_title.strip()
+                
+                # Extract age group if present
+                age_match = re.search(r'\[Ages?\s*(\d+-\d+)\]|\(Ages?\s*(\d+-\d+)\)', title)
+                age_group = age_match.group(1) or age_match.group(2) if age_match else None
+                
+                # Create unique key that includes age group to keep them separate
+                if age_group:
+                    unique_key = f"{base_title} [Ages {age_group}]"
+                else:
+                    unique_key = base_title
+                
+                if unique_key not in activities_by_base_title:
+                    activities_by_base_title[unique_key] = {
+                        'events': [],
+                        'dates': set(),
+                        'locations': set(),
+                        'times': set(),
+                        'base_title': base_title,
+                        'age_group': age_group
+                    }
+                
+                date = format_date(event['start'])
+                time = format_time(event['start'])
+                end_time = format_end_time(event.get('end', ''))
+                activities_by_base_title[unique_key]['events'].append(event)
+                activities_by_base_title[unique_key]['dates'].add(date)
+                activities_by_base_title[unique_key]['times'].add(time)
+                if event.get('end'):
+                    activities_by_base_title[unique_key]['end_times'] = activities_by_base_title[unique_key].get('end_times', set())
+                    activities_by_base_title[unique_key]['end_times'].add(end_time)
+                if event.get('location'):
+                    activities_by_base_title[unique_key]['locations'].add(event['location'])
+            
+            for unique_key, info in activities_by_base_title.items():
+                events = info['events']
+                dates = sorted(info['dates'], key=lambda x: datetime.strptime(x, '%B %d'))
+                times = sorted(info['times'])
+                end_times = sorted(info.get('end_times', set()))
+                locations = list(info['locations'])
+                base_title = info['base_title']
+                age_group = info['age_group']
+                
+                # Create event text
+                event_text = base_title
+                
+                # Add age group if present
+                if age_group:
+                    event_text += f" [Ages {age_group}]"
+                
+                if locations:
+                    event_text += f" – {', '.join(locations)}"
+                
+                # Enhanced logic to determine if it's a daily/recurring event
+                title_lower = base_title.lower()
+                is_recurring_by_keywords = any(word in title_lower for word in ['camp', 'daily', 'weekly', 'ongoing', 'recurring', 'class', 'program', 'club', 'ride', 'bus'])
+                
+                # Check if events span multiple days or appear frequently
+                date_objects = [datetime.strptime(date, '%B %d') for date in dates]
+                date_range_days = (max(date_objects) - min(date_objects)).days + 1
+                events_per_day = len(events) / len(dates) if dates else 0
+                
+                # Consider it daily if:
+                # 1. Has recurring keywords, OR
+                # 2. Spans multiple days, OR  
+                # 3. Has multiple events per day (like different age groups)
+                is_daily = (is_recurring_by_keywords or 
+                           len(dates) > 1 or 
+                           events_per_day > 1)
+                
+                if is_daily:
+                    # Daily event - show as daily with all times
+                    if end_times and len(end_times) == len(times):
+                        # Show start-end time pairs
+                        time_pairs = []
+                        for i, start_time in enumerate(times):
+                            if i < len(end_times):
+                                time_pairs.append(f"{start_time}-{end_times[i]}")
+                            else:
+                                time_pairs.append(start_time)
+                        event_text += f" (daily, {', '.join(time_pairs)})"
+                    else:
+                        # Just show start times
+                        event_text += f" (daily, {', '.join(times)})"
+                else:
+                    # Single day event - show date and time
+                    if end_times and len(end_times) == len(times):
+                        # Show start-end time pairs
+                        time_pairs = []
+                        for i, start_time in enumerate(times):
+                            if i < len(end_times):
+                                time_pairs.append(f"{start_time}-{end_times[i]}")
+                            else:
+                                time_pairs.append(start_time)
+                        event_text += f" ({dates[0]}, {', '.join(time_pairs)})"
+                    else:
+                        # Just show start times
+                        event_text += f" ({dates[0]}, {', '.join(times)})"
+                
+                html_content += f'''
+                            <div style="margin-bottom: 8px; font-size: 15px; line-height: 1.4; color: #2c3e50;">• {event_text}</div>
+                '''
+            
+            html_content += '''
                         </div>
             '''
         
@@ -289,6 +708,24 @@ def format_time(time_str):
             return dt.strftime('%B %d, %Y')
         except:
             return time_str
+
+def format_end_time(time_str):
+    """
+    Format end time string for display.
+    
+    :param time_str: ISO format time string
+    :return: Formatted end time string
+    """
+    if 'T' in time_str:
+        # Has time component
+        try:
+            dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+            return dt.strftime('%I:%M%p')
+        except:
+            return time_str
+    else:
+        # Date only - return empty string since no end time
+        return ""
 
 def send_calendar_email(calendar_data, subject=None):
     """
