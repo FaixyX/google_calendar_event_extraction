@@ -18,7 +18,7 @@ RECIPIENT_EMAIL = os.getenv('RECIPIENT_EMAIL', '')
 
 def format_calendar_data_for_email(calendar_data):
     """
-    Format the calendar data into a readable HTML email format with tabular layout.
+    Format the calendar data into a clean, professional email format showing only one-time events.
     
     :param calendar_data: Dictionary containing categorized events
     :return: HTML formatted string for email
@@ -26,8 +26,16 @@ def format_calendar_data_for_email(calendar_data):
     if not calendar_data:
         return "<p>No calendar events found for the specified time period.</p>"
     
+    # Get only one-time events
+    all_one_time_events = []
+    for date in calendar_data:
+        all_one_time_events.extend(calendar_data[date]['one_time_events'])
+    
+    if not all_one_time_events:
+        return "<p>No upcoming one-time events found for the specified time period.</p>"
+    
     # Count total events for summary
-    total_events = sum(len(calendar_data[date]['ongoing_events']) + len(calendar_data[date]['one_time_events']) for date in calendar_data)
+    total_events = len(all_one_time_events)
     
     # Get date range
     sorted_dates = sorted(calendar_data.keys())
@@ -48,66 +56,97 @@ def format_calendar_data_for_email(calendar_data):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Calendar Summary</title>
     </head>
-    <body style="font-family: Arial, sans-serif; font-size: 16px; margin: 0; padding: 0; background-color: #F5F8FA;">
-        <div style="margin: auto; width: 800px; background-color: #fff;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                    <td style="background-color: #4285f4; color: white; text-align: center; padding: 30px;">
-                        <h1 style="margin: 0; font-size: 36px; font-weight: 900;">📅 Calendar Summary</h1>
-                        <p style="margin: 10px 0 0 0; font-size: 18px;">Here's your calendar summary for {date_range}</p>
-                    </td>
-                </tr>
-            </table>
+    <body style="font-family: Arial, sans-serif; font-size: 16px; margin: 0; padding: 20px; background-color: #f5f5f5;">
+        <div style="max-width: 800px; margin: 0 auto; background-color: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
+            <!-- Professional Header -->
+            <div style="background-color: #2c3e50; color: white; text-align: center; padding: 30px;">
+                <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📅 Calendar Summary</h1>
+                <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Here's your calendar summary for {date_range}</p>
+            </div>
             
             <div style="padding: 30px;">
                 <!-- Summary Section -->
-                <div style="background-color: #e3f2fd; border: 2px solid #2196f3; border-radius: 8px; padding: 20px; margin-bottom: 30px; text-align: center;">
-                    <h3 style="margin: 0 0 10px 0; color: #1976d2; font-size: 20px;">📊 Summary</h3>
-                    <p style="margin: 0; color: #333; font-size: 16px;"><strong>{total_events} total events</strong> across {len(calendar_data)} days</p>
+                <div style="background-color: #ecf0f1; border-left: 4px solid #3498db; padding: 20px; margin-bottom: 30px; border-radius: 4px;">
+                    <h3 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 18px;">📊 Summary</h3>
+                    <p style="margin: 0; color: #34495e; font-size: 16px;"><strong>{total_events} upcoming one-time events</strong> across {len(calendar_data)} days</p>
                 </div>
     '''
     
-    for date in sorted_dates:
-        date_obj = datetime.strptime(date, '%Y-%m-%d')
-        formatted_date = date_obj.strftime('%A, %B %d, %Y')
+    # Group events by date
+    events_by_date = {}
+    for event in all_one_time_events:
+        date = format_date(event['start'])
+        if date not in events_by_date:
+            events_by_date[date] = []
+        events_by_date[date].append(event)
+    
+    # Sort dates
+    sorted_dates = sorted(events_by_date.keys(), key=lambda x: datetime.strptime(x, '%B %d'))
+    
+    for i, date in enumerate(sorted_dates):
+        events = events_by_date[date]
         
-        ongoing_events = calendar_data[date]['ongoing_events']
-        one_time_events = calendar_data[date]['one_time_events']
+        # Get full date for header
+        try:
+            # Find the original date from calendar_data
+            for original_date in sorted(calendar_data.keys()):
+                date_obj = datetime.strptime(original_date, '%Y-%m-%d')
+                if date_obj.strftime('%B %d') == date:
+                    full_date = date_obj.strftime('%A, %B %d')
+                    break
+            else:
+                full_date = date
+        except:
+            full_date = date
         
-        # Only show date if there are events
-        if ongoing_events or one_time_events:
-            html_content += f'''
+        html_content += f'''
                 <!-- Date Section -->
-                <div style="background-color: #4285f4; color: white; padding: 15px; font-size: 18px; font-weight: bold; border-radius: 5px 5px 0 0; margin-bottom: 0;">
-                    Date: {formatted_date}
-                </div>
-            '''
+                <div style="margin-bottom: 25px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
+                    <div style="background-color: #34495e; color: white; padding: 15px 20px;">
+                        <h2 style="margin: 0; font-size: 18px; font-weight: 600;">{full_date}</h2>
+                    </div>
+                    <div style="padding: 20px; background-color: white;">
+        '''
         
-        # Add ongoing events table
-        if ongoing_events:
+        for event in events:
+            title = event["summary"]
+            location = event.get('location', '')
+            start_time = format_time(event['start'])
+            
+            # Get emoji based on event title
+            emoji = get_event_emoji(title)
+            
+            # Create event text
+            event_text = f"{emoji} {title}"
+            if location:
+                event_text += f" – {location}"
+            event_text += f" ({start_time})"
+            
+            # Add booking link separately if available
+            if event.get('booking_links'):
+                cleaned_links = [clean_booking_url(link) for link in event['booking_links'] if clean_booking_url(link)]
+                if cleaned_links:
+                    booking_link = cleaned_links[0]
+                    event_text += f'<br><a href="{booking_link}" target="_blank" style="display: inline-block; background-color: #3498db; color: white; text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 4px; margin-top: 8px; font-weight: 500;">🔗 Book Here</a>'
+                    if len(cleaned_links) > 1:
+                        event_text += f'<br><a href="{cleaned_links[1]}" target="_blank" style="display: inline-block; background-color: #27ae60; color: white; text-decoration: none; font-size: 12px; padding: 6px 12px; border-radius: 4px; margin-top: 5px; font-weight: 500;">🔗 Additional Booking</a>'
+            
             html_content += f'''
-                <div style="color: #555; font-size: 16px; font-weight: bold; margin: 20px 0 10px 0;">🔄 Ongoing Events ({len(ongoing_events)} events)</div>
-                {create_events_table(ongoing_events)}
+                        <div style="margin-bottom: 12px; padding: 12px; background-color: #f8f9fa; border-left: 3px solid #3498db; border-radius: 3px;">
+                            <div style="font-size: 15px; line-height: 1.4; color: #2c3e50;">• {event_text}</div>
+                        </div>
             '''
         
-        # Add one-time events table
-        if one_time_events:
-            html_content += f'''
-                <div style="color: #555; font-size: 16px; font-weight: bold; margin: 20px 0 10px 0;">📅 One-time Events ({len(one_time_events)} events)</div>
-                {create_events_table(one_time_events)}
-            '''
-        
-        # If no events for this date
-        if not ongoing_events and not one_time_events:
-            html_content += '''
-                <div style="color: #666; font-style: italic; padding: 20px; text-align: center; background-color: #f8f9fa; border: 1px solid #ddd; border-radius: 5px;">
-                    No events scheduled for this date.
+        html_content += '''
+                    </div>
                 </div>
-            '''
+        '''
     
     html_content += '''
-                <div style="text-align: center; color: #666; font-style: italic; margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd;">
-                    This email was automatically generated from your Google Calendar data.
+                <!-- Professional Footer -->
+                <div style="text-align: center; color: #7f8c8d; margin-top: 30px; padding: 20px; border-top: 1px solid #ecf0f1; background-color: #f8f9fa;">
+                    <p style="margin: 0; font-size: 14px;">This email was automatically generated from your Google Calendar data.</p>
+                    <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.7;">Powered by Calendar Summary Bot</p>
                 </div>
             </div>
         </div>
@@ -126,9 +165,6 @@ def clean_booking_url(url):
     """
     if not url:
         return ""
-    
-    # Remove HTML tags and their content
-    import re
     
     # Remove HTML tags like <b>BOOK</b>, <b>Check</b>, etc.
     url = re.sub(r'<[^>]+>', '', url)
@@ -392,3 +428,55 @@ def create_plain_text_table(events):
     
     table_text += "\n"
     return table_text 
+
+def get_event_emoji(title):
+    """
+    Get appropriate emoji based on event title.
+    
+    :param title: Event title
+    :return: Emoji string
+    """
+    title_lower = title.lower()
+    
+    # Storytime and reading events
+    if any(word in title_lower for word in ['storytime', 'story', 'read', 'book', 'tale']):
+        return '📚'
+    
+    # Music events
+    if any(word in title_lower for word in ['music', 'musica', 'jam', 'song', 'sing']):
+        return '🎵'
+    
+    # Yoga and fitness events
+    if any(word in title_lower for word in ['yoga', 'zen', 'fit', 'exercise', 'workout']):
+        return '🧘'
+    
+    # Art and craft events
+    if any(word in title_lower for word in ['art', 'craft', 'paint', 'draw', 'creative']):
+        return '🎨'
+    
+    # Games and activities
+    if any(word in title_lower for word in ['game', 'chess', 'play', 'activity']):
+        return '🎲'
+    
+    # Bike and outdoor events
+    if any(word in title_lower for word in ['bike', 'bicycle', 'outdoor', 'beach']):
+        return '🚲'
+    
+    # Photo and media events
+    if any(word in title_lower for word in ['photo', 'picture', 'frame', 'media']):
+        return '🖼️'
+    
+    # Baby and toddler events
+    if any(word in title_lower for word in ['baby', 'toddler', 'infant', 'child']):
+        return '👶'
+    
+    # Teen events
+    if any(word in title_lower for word in ['teen', 'adolescent', 'youth']):
+        return '👨‍🎓'
+    
+    # Adult events
+    if any(word in title_lower for word in ['adult', 'grown']):
+        return '👤'
+    
+    # Default emoji
+    return '📅' 
